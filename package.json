@@ -1,0 +1,25 @@
+{
+  "name": "nfl-updaters",
+  "version": "1.0.0",
+  "description": "NFL play-by-play data updater for Supabase - runs on Render",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node index.js --test"
+  },
+  "keywords": [
+    "nfl",
+    "nflfastr",
+    "sports",
+    "analytics"
+  ],
+  "author": "Paul - Propify",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

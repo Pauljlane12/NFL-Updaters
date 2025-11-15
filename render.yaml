@@ -1,0 +1,14 @@
+services:
+  - type: cron
+    name: nfl-pbp-updater
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    schedule: "0 */6 * * *"  # Every 6 hours
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false  # Set in Render dashboard
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false  # Set in Render dashboard
