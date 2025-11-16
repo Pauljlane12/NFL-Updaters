@@ -47,18 +47,12 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 // ─────────────────────────────────────────────────────────────
 // Helper Functions
 // ─────────────────────────────────────────────────────────────
-function nextThursdayUtcStart(base) {
-  const d = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), 0, 0, 0));
-  const day = d.getUTCDay(); // Sun=0..Sat=6
-  const offset = day <= 3 ? 4 - day : 11 - day; // to next Thu 00:00Z
-  d.setUTCDate(d.getUTCDate() + offset);
-  return d;
-}
-
-function getUpcomingWeekWindow(now = new Date()) {
-  const start = nextThursdayUtcStart(now);
+function getUpcomingGamesWindow(now = new Date()) {
+  // Start from today at 00:00 UTC
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+  // End 4 days from today
   const end = new Date(start);
-  end.setUTCDate(end.getUTCDate() + 7);
+  end.setUTCDate(end.getUTCDate() + 4);
   return { start, end };
 }
 
@@ -120,12 +114,12 @@ function toNumber(x) {
 // ─────────────────────────────────────────────────────────────
 async function runUpdater() {
   try {
-    console.log('BUILD: v2-ThuWed-window (decimal_price only, outcome_price=NULL)');
+    console.log('BUILD: v3-Rolling-4-Day-Window (decimal_price only, outcome_price=NULL)');
     
-    // Window = upcoming Thu→Wed (UTC), same as local script
+    // Window = today + 4 days
     const now = new Date();
-    const { start, end } = getUpcomingWeekWindow(now);
-    console.log(`📅 Window (Thu→Wed): ${start.toISOString()} → ${end.toISOString()}`);
+    const { start, end } = getUpcomingGamesWindow(now);
+    console.log(`📅 Window (Today + 4 days): ${start.toISOString()} → ${end.toISOString()}`);
     
     // Optional in-season guard (bypass if testMode)
     if (!isInSeason(now) && !testMode) {
@@ -148,17 +142,17 @@ async function runUpdater() {
     const allEvents = await eventsRes.json();
     console.log(`✅ Found ${allEvents.length} events total`);
     
-    // 2) Filter to Thu→Wed window
+    // 2) Filter to today + 4 days window
     const events = allEvents.filter((e) => {
       const t = new Date(e.commence_time);
       return t >= start && t < end;
     });
-    console.log(`🎯 Filtered to ${events.length} events in upcoming window`);
+    console.log(`🎯 Filtered to ${events.length} events in 4-day window`);
     
     if (!events.length) {
       return {
         success: true,
-        message: 'No games in upcoming window',
+        message: 'No games in 4-day window',
         inserted: 0
       };
     }
