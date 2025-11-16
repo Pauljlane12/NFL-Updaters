@@ -14,7 +14,7 @@ if (testMode) {
 // ─────────────────────────────────────────────────────────────
 // CONFIG
 // ─────────────────────────────────────────────────────────────
-const ODDS_API_KEY = 'feda7e2063f85e1822c2623832e9eefc';
+const ODDS_API_KEY = process.env.ODDS_API_KEY;
 const SPORTS_KEY = 'americanfootball_nfl';
 const BOOKMAKERS = 'draftkings,fanduel';
 const ALTERNATE_MARKETS = [
@@ -36,8 +36,8 @@ const ALTERNATE_MARKETS = [
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('❌ Error: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables are required');
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !ODDS_API_KEY) {
+  console.error('❌ Error: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and ODDS_API_KEY environment variables are required');
   process.exit(1);
 }
 
