@@ -1,10 +1,26 @@
 services:
+  # Play-by-play updater - runs every 6 hours during NFL season
   - type: cron
     name: nfl-pbp-updater
     runtime: node
     buildCommand: npm install
     startCommand: npm start
     schedule: "0 */6 * * *"  # Every 6 hours
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false  # Set in Render dashboard
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false  # Set in Render dashboard
+
+  # Odds alternate lines updater - runs every 3 hours for fresh betting lines
+  - type: cron
+    name: nfl-odds-alternate-lines
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm run odds
+    schedule: "0 */3 * * *"  # Every 3 hours
     envVars:
       - key: NODE_ENV
         value: production

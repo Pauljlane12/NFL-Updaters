@@ -1,17 +1,21 @@
 {
   "name": "nfl-updaters",
   "version": "1.0.0",
-  "description": "NFL play-by-play data updater for Supabase - runs on Render",
+  "description": "NFL play-by-play data and odds updater for Supabase - runs on Render",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "node index.js --test"
+    "test": "node index.js --test",
+    "odds": "node nfl-odds-alternate.js",
+    "odds:test": "node nfl-odds-alternate.js --test"
   },
   "keywords": [
     "nfl",
     "nflfastr",
     "sports",
-    "analytics"
+    "analytics",
+    "betting",
+    "odds"
   ],
   "author": "Paul - Propify",
   "license": "MIT",
