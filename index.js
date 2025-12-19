@@ -4,12 +4,21 @@ const fetch = require('node-fetch');
 // Check for test mode from command line
 const testMode = process.argv.includes('--test');
 
-console.log('🏈 Complete NFLfastR Play-by-Play Updater - All 372 Columns - 2025 Season');
+console.log('🏈 NFLfastR Backfill - Specific Team/Week Combinations');
 console.log('===============================================================================');
+console.log('🎯 Targeting:');
+console.log('   - Kansas City Chiefs: Week 10');
+console.log('   - Washington Commanders: Week 12');
 
 if (testMode) {
   console.log('🧪 TEST MODE: No database changes will be made');
 }
+
+// BACKFILL TARGETS
+const BACKFILL_TARGETS = [
+  { team: 'KC', week: 10 },   // Kansas City Chiefs week 10
+  { team: 'WAS', week: 12 }   // Washington Commanders week 12
+];
 
 // Get environment variables
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -41,15 +50,24 @@ const safeText = (value) => {
   return String(value).trim();
 };
 
-const safeBoolean = (value) => {
-  if (value === null || value === undefined || value === '' || value === 'NA') return null;
-  return value === '1' || value === 'true' || value === true;
-};
-
 const safeDouble = (value) => {
   if (value === null || value === undefined || value === '' || value === 'NA') return null;
   const num = parseFloat(value);
   return isNaN(num) ? null : num;
+};
+
+// Check if play matches our backfill targets
+const isTargetPlay = (row) => {
+  const week = safeInteger(row.week);
+  const homeTeam = safeText(row.home_team);
+  const awayTeam = safeText(row.away_team);
+  
+  for (const target of BACKFILL_TARGETS) {
+    if (week === target.week && (homeTeam === target.team || awayTeam === target.team)) {
+      return true;
+    }
+  }
+  return false;
 };
 
 // NFLfastR data sources
@@ -66,22 +84,6 @@ const FALLBACK_SOURCES = [
   'https://raw.githubusercontent.com/nflverse/nfldata/master/data/play_by_play_2025.csv'
 ];
 
-// Season check
-const now = new Date();
-const currentYear = now.getFullYear();
-const nflSeasonStart = new Date(`${currentYear}-09-05`);
-const nflSeasonEnd = new Date(`${currentYear + 1}-02-15`);
-
-console.log(`\n📅 Current date: ${now.toISOString()}`);
-console.log(`🏈 NFL 2025 Season: ${nflSeasonStart.toDateString()} to ${nflSeasonEnd.toDateString()}`);
-
-const inNflSeason = now >= nflSeasonStart && now <= nflSeasonEnd;
-console.log(`🏈 In NFL Season: ${inNflSeason}`);
-
-// Date filtering: Only process games from last 7 days
-const cutoffDate = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
-console.log(`📅 Date filter: Only processing games from ${cutoffDate.toDateString()} onwards`);
-
 // Memory-efficient fetch and parse function
 async function fetchAndParsePbp() {
   const sources = [NFLVERSE_SOURCES.pbp, ALT_SOURCES.pbp, ...FALLBACK_SOURCES];
@@ -93,7 +95,7 @@ async function fetchAndParsePbp() {
       const response = await fetch(url, {
         headers: {
           'Accept': 'text/csv,application/csv,text/plain',
-          'User-Agent': 'nflfastr-complete-updater/1.0'
+          'User-Agent': 'nflfastr-backfill/1.0'
         }
       });
       
@@ -116,7 +118,7 @@ async function fetchAndParsePbp() {
       const pbpData = [];
       let totalProcessed = 0;
       let validPlays = 0;
-      let filteredOldPlays = 0;
+      let filteredPlays = 0;
       
       for (let i = 1; i < lines.length; i++) {
         totalProcessed++;
@@ -145,31 +147,22 @@ async function fetchAndParsePbp() {
             row[header] = values[index] || null;
           });
           
-          // Date filtering: Only include games from last 7 days
-          const gameDate = row.game_date;
-          if (gameDate) {
-            const gameDateObj = new Date(gameDate);
-            if (gameDateObj >= cutoffDate) {
-              validPlays++;
-              pbpData.push(row);
-            } else {
-              filteredOldPlays++;
-            }
-          } else {
-            // Include plays without game_date (shouldn't happen but safe fallback)
+          // Filter: Only include target team/week combinations
+          if (isTargetPlay(row)) {
             validPlays++;
             pbpData.push(row);
+          } else {
+            filteredPlays++;
           }
         }
         
-        // Memory optimization: Log progress more frequently
         if (totalProcessed % 50000 === 0) {
-          console.log(`  📊 Processed ${totalProcessed} lines, found ${validPlays} recent plays, filtered ${filteredOldPlays} old plays`);
+          console.log(`  📊 Processed ${totalProcessed} lines, found ${validPlays} target plays`);
           if (global.gc) global.gc();
         }
       }
       
-      console.log(`✅ Parsing complete: ${totalProcessed} total, ${validPlays} recent plays, ${filteredOldPlays} filtered old plays`);
+      console.log(`✅ Parsing complete: ${totalProcessed} total, ${validPlays} target plays, ${filteredPlays} filtered`);
       return pbpData;
       
     } catch (error) {
@@ -182,19 +175,10 @@ async function fetchAndParsePbp() {
 }
 
 // Main execution function
-async function runUpdater() {
+async function runBackfill() {
   try {
-    if (!inNflSeason && !testMode) {
-      console.log('📅 Outside NFL season - skipping sync (use --test flag to override)');
-      return {
-        success: true,
-        message: 'Outside NFL season - sync skipped',
-        skipped: true
-      };
-    }
-    
     // Fetch play-by-play data
-    console.log('\n📦 Fetching complete NFLfastR data...');
+    console.log('\n📦 Fetching NFLfastR data for backfill...');
     let pbpData;
     
     try {
@@ -208,23 +192,33 @@ async function runUpdater() {
       };
     }
     
-    console.log(`📊 Found ${pbpData.length} play records`);
+    console.log(`📊 Found ${pbpData.length} plays for target teams/weeks`);
     
     if (pbpData.length === 0) {
       return {
         success: true,
-        message: 'No play-by-play data found',
+        message: 'No plays found for target team/week combinations',
         plays_found: 0
       };
     }
     
-    // COMPLETE TRANSFORMATION - ALL 372 COLUMNS
-    console.log('\n🔄 Transforming complete dataset with all 372 columns...');
+    // Log breakdown by target
+    const breakdown = {};
+    for (const play of pbpData) {
+      const key = `Week ${play.week}: ${play.home_team} vs ${play.away_team}`;
+      breakdown[key] = (breakdown[key] || 0) + 1;
+    }
+    console.log('\n📊 Breakdown by game:');
+    for (const [game, count] of Object.entries(breakdown)) {
+      console.log(`   ${game}: ${count} plays`);
+    }
+    
+    // TRANSFORMATION - ALL 372 COLUMNS (same as original)
+    console.log('\n🔄 Transforming plays...');
     const transformedPlays = [];
     const skippedPlays = [];
     
     for (const play of pbpData) {
-      // Validation
       const skipReasons = [];
       if (!play.game_id) skipReasons.push('Missing game_id');
       if (!play.play_id) skipReasons.push('Missing play_id');
@@ -238,13 +232,10 @@ async function runUpdater() {
         continue;
       }
       
-      // COMPLETE TRANSFORMATION - EVERY SINGLE COLUMN
+      // COMPLETE TRANSFORMATION (same mapping as original script)
       transformedPlays.push({
-        // Core required fields (numeric not null)
         play_id: safeNumeric(play.play_id),
         game_id: safeText(play.game_id),
-        
-        // All other columns - COMPLETE MAPPING (372 columns total)
         old_game_id: safeNumeric(play.old_game_id),
         home_team: safeText(play.home_team),
         away_team: safeText(play.away_team),
@@ -335,14 +326,12 @@ async function runUpdater() {
         total_away_raw_air_epa: safeText(play.total_away_raw_air_epa),
         total_home_raw_yac_epa: safeText(play.total_home_raw_yac_epa),
         total_away_raw_yac_epa: safeText(play.total_away_raw_yac_epa),
-        // Win Probability (double precision columns)
         wp: safeDouble(play.wp),
         def_wp: safeDouble(play.def_wp),
         home_wp: safeDouble(play.home_wp),
         away_wp: safeDouble(play.away_wp),
         vegas_wp: safeDouble(play.vegas_wp),
         vegas_home_wp: safeDouble(play.vegas_home_wp),
-        // WPA text columns
         wpa: safeText(play.wpa),
         vegas_wpa: safeText(play.vegas_wpa),
         vegas_home_wpa: safeText(play.vegas_home_wpa),
@@ -364,7 +353,6 @@ async function runUpdater() {
         total_away_raw_air_wpa: safeText(play.total_away_raw_air_wpa),
         total_home_raw_yac_wpa: safeText(play.total_home_raw_yac_wpa),
         total_away_raw_yac_wpa: safeText(play.total_away_raw_yac_wpa),
-        // Play outcome booleans
         punt_blocked: safeText(play.punt_blocked),
         first_down_rush: safeText(play.first_down_rush),
         first_down_pass: safeText(play.first_down_pass),
@@ -416,7 +404,6 @@ async function runUpdater() {
         lateral_rush: safeText(play.lateral_rush),
         lateral_return: safeText(play.lateral_return),
         lateral_recovery: safeText(play.lateral_recovery),
-        // Player IDs and names
         passer_player_id: safeText(play.passer_player_id),
         passer_player_name: safeText(play.passer_player_name),
         passing_yards: safeText(play.passing_yards),
@@ -426,7 +413,6 @@ async function runUpdater() {
         rusher_player_id: safeText(play.rusher_player_id),
         rusher_player_name: safeText(play.rusher_player_name),
         rushing_yards: safeText(play.rushing_yards),
-        // Lateral player information
         lateral_receiver_player_id: safeText(play.lateral_receiver_player_id),
         lateral_receiver_player_name: safeText(play.lateral_receiver_player_name),
         lateral_receiving_yards: safeText(play.lateral_receiving_yards),
@@ -435,12 +421,10 @@ async function runUpdater() {
         lateral_rushing_yards: safeText(play.lateral_rushing_yards),
         lateral_sack_player_id: safeText(play.lateral_sack_player_id),
         lateral_sack_player_name: safeText(play.lateral_sack_player_name),
-        // Interception players
         interception_player_id: safeText(play.interception_player_id),
         interception_player_name: safeText(play.interception_player_name),
         lateral_interception_player_id: safeText(play.lateral_interception_player_id),
         lateral_interception_player_name: safeText(play.lateral_interception_player_name),
-        // Return players
         punt_returner_player_id: safeText(play.punt_returner_player_id),
         punt_returner_player_name: safeText(play.punt_returner_player_name),
         lateral_punt_returner_player_id: safeText(play.lateral_punt_returner_player_id),
@@ -449,41 +433,34 @@ async function runUpdater() {
         kickoff_returner_player_id: safeText(play.kickoff_returner_player_id),
         lateral_kickoff_returner_player_id: safeText(play.lateral_kickoff_returner_player_id),
         lateral_kickoff_returner_player_name: safeText(play.lateral_kickoff_returner_player_name),
-        // Kickers and punters
         punter_player_id: safeText(play.punter_player_id),
         punter_player_name: safeText(play.punter_player_name),
         kicker_player_name: safeText(play.kicker_player_name),
         kicker_player_id: safeText(play.kicker_player_id),
-        // Special recovery players
         own_kickoff_recovery_player_id: safeText(play.own_kickoff_recovery_player_id),
         own_kickoff_recovery_player_name: safeText(play.own_kickoff_recovery_player_name),
         blocked_player_id: safeText(play.blocked_player_id),
         blocked_player_name: safeText(play.blocked_player_name),
-        // Tackle for loss players
         tackle_for_loss_1_player_id: safeText(play.tackle_for_loss_1_player_id),
         tackle_for_loss_1_player_name: safeText(play.tackle_for_loss_1_player_name),
         tackle_for_loss_2_player_id: safeText(play.tackle_for_loss_2_player_id),
         tackle_for_loss_2_player_name: safeText(play.tackle_for_loss_2_player_name),
-        // QB hit players
         qb_hit_1_player_id: safeText(play.qb_hit_1_player_id),
         qb_hit_1_player_name: safeText(play.qb_hit_1_player_name),
         qb_hit_2_player_id: safeText(play.qb_hit_2_player_id),
         qb_hit_2_player_name: safeText(play.qb_hit_2_player_name),
-        // Forced fumble players
         forced_fumble_player_1_team: safeText(play.forced_fumble_player_1_team),
         forced_fumble_player_1_player_id: safeText(play.forced_fumble_player_1_player_id),
         forced_fumble_player_1_player_name: safeText(play.forced_fumble_player_1_player_name),
         forced_fumble_player_2_team: safeText(play.forced_fumble_player_2_team),
         forced_fumble_player_2_player_id: safeText(play.forced_fumble_player_2_player_id),
         forced_fumble_player_2_player_name: safeText(play.forced_fumble_player_2_player_name),
-        // Solo tackle players
         solo_tackle_1_team: safeText(play.solo_tackle_1_team),
         solo_tackle_2_team: safeText(play.solo_tackle_2_team),
         solo_tackle_1_player_id: safeText(play.solo_tackle_1_player_id),
         solo_tackle_2_player_id: safeText(play.solo_tackle_2_player_id),
         solo_tackle_1_player_name: safeText(play.solo_tackle_1_player_name),
         solo_tackle_2_player_name: safeText(play.solo_tackle_2_player_name),
-        // Assist tackle players (1-4)
         assist_tackle_1_player_id: safeText(play.assist_tackle_1_player_id),
         assist_tackle_1_player_name: safeText(play.assist_tackle_1_player_name),
         assist_tackle_1_team: safeText(play.assist_tackle_1_team),
@@ -496,7 +473,6 @@ async function runUpdater() {
         assist_tackle_4_player_id: safeText(play.assist_tackle_4_player_id),
         assist_tackle_4_player_name: safeText(play.assist_tackle_4_player_name),
         assist_tackle_4_team: safeText(play.assist_tackle_4_team),
-        // Tackle with assist
         tackle_with_assist: safeText(play.tackle_with_assist),
         tackle_with_assist_1_player_id: safeText(play.tackle_with_assist_1_player_id),
         tackle_with_assist_1_player_name: safeText(play.tackle_with_assist_1_player_name),
@@ -504,19 +480,16 @@ async function runUpdater() {
         tackle_with_assist_2_player_id: safeText(play.tackle_with_assist_2_player_id),
         tackle_with_assist_2_player_name: safeText(play.tackle_with_assist_2_player_name),
         tackle_with_assist_2_team: safeText(play.tackle_with_assist_2_team),
-        // Pass defense players
         pass_defense_1_player_id: safeText(play.pass_defense_1_player_id),
         pass_defense_1_player_name: safeText(play.pass_defense_1_player_name),
         pass_defense_2_player_id: safeText(play.pass_defense_2_player_id),
         pass_defense_2_player_name: safeText(play.pass_defense_2_player_name),
-        // Fumble players
         fumbled_1_team: safeText(play.fumbled_1_team),
         fumbled_1_player_id: safeText(play.fumbled_1_player_id),
         fumbled_1_player_name: safeText(play.fumbled_1_player_name),
         fumbled_2_player_id: safeText(play.fumbled_2_player_id),
         fumbled_2_player_name: safeText(play.fumbled_2_player_name),
         fumbled_2_team: safeText(play.fumbled_2_team),
-        // Fumble recovery players
         fumble_recovery_1_team: safeText(play.fumble_recovery_1_team),
         fumble_recovery_1_yards: safeText(play.fumble_recovery_1_yards),
         fumble_recovery_1_player_id: safeText(play.fumble_recovery_1_player_id),
@@ -525,14 +498,12 @@ async function runUpdater() {
         fumble_recovery_2_yards: safeText(play.fumble_recovery_2_yards),
         fumble_recovery_2_player_id: safeText(play.fumble_recovery_2_player_id),
         fumble_recovery_2_player_name: safeText(play.fumble_recovery_2_player_name),
-        // Sack players
         sack_player_id: safeText(play.sack_player_id),
         sack_player_name: safeText(play.sack_player_name),
         half_sack_1_player_id: safeText(play.half_sack_1_player_id),
         half_sack_1_player_name: safeText(play.half_sack_1_player_name),
         half_sack_2_player_id: safeText(play.half_sack_2_player_id),
         half_sack_2_player_name: safeText(play.half_sack_2_player_name),
-        // Return and penalty info
         return_team: safeText(play.return_team),
         return_yards: safeText(play.return_yards),
         penalty_team: safeText(play.penalty_team),
@@ -542,14 +513,12 @@ async function runUpdater() {
         replay_or_challenge: safeText(play.replay_or_challenge),
         replay_or_challenge_result: safeText(play.replay_or_challenge_result),
         penalty_type: safeText(play.penalty_type),
-        // Defensive scoring
         defensive_two_point_attempt: safeText(play.defensive_two_point_attempt),
         defensive_two_point_conv: safeText(play.defensive_two_point_conv),
         defensive_extra_point_attempt: safeText(play.defensive_extra_point_attempt),
         defensive_extra_point_conv: safeText(play.defensive_extra_point_conv),
         safety_player_name: safeText(play.safety_player_name),
         safety_player_id: safeText(play.safety_player_id),
-        // Season and advanced metrics
         season: safeNumeric(play.season),
         cp: safeText(play.cp),
         cpoe: safeText(play.cpoe),
@@ -569,7 +538,6 @@ async function runUpdater() {
         st_play_type: safeText(play.st_play_type),
         end_clock_time: safeText(play.end_clock_time),
         end_yard_line: safeText(play.end_yard_line),
-        // Drive information
         fixed_drive: safeNumeric(play.fixed_drive),
         fixed_drive_result: safeText(play.fixed_drive_result),
         drive_real_start_time: safeText(play.drive_real_start_time),
@@ -589,7 +557,6 @@ async function runUpdater() {
         drive_end_yard_line: safeText(play.drive_end_yard_line),
         drive_play_id_started: safeText(play.drive_play_id_started),
         drive_play_id_ended: safeText(play.drive_play_id_ended),
-        // Game level information
         away_score: safeText(play.away_score),
         home_score: safeNumeric(play.home_score),
         location: safeText(play.location),
@@ -606,7 +573,6 @@ async function runUpdater() {
         away_coach: safeText(play.away_coach),
         stadium_id: safeText(play.stadium_id),
         game_stadium: safeText(play.game_stadium),
-        // Additional play flags
         aborted_play: safeText(play.aborted_play),
         success: safeText(play.success),
         passer: safeText(play.passer),
@@ -626,14 +592,12 @@ async function runUpdater() {
         name: safeText(play.name),
         jersey_number: safeText(play.jersey_number),
         id: safeText(play.id),
-        // Fantasy information
         fantasy_player_name: safeText(play.fantasy_player_name),
         fantasy_player_id: safeText(play.fantasy_player_id),
         fantasy: safeText(play.fantasy),
         fantasy_id: safeText(play.fantasy_id),
         out_of_bounds: safeText(play.out_of_bounds),
         home_opening_kickoff: safeText(play.home_opening_kickoff),
-        // Advanced analytics
         qb_epa: safeText(play.qb_epa),
         xyac_epa: safeText(play.xyac_epa),
         xyac_mean_yardage: safeText(play.xyac_mean_yardage),
@@ -645,15 +609,13 @@ async function runUpdater() {
       });
     }
     
-    console.log(`✅ Transformation complete: ${transformedPlays.length} valid plays, ${skippedPlays.length} skipped`);
+    console.log(`✅ Transformation complete: ${transformedPlays.length} valid plays`);
     
     if (transformedPlays.length === 0) {
       return {
         success: true,
-        message: 'No valid 2025 play-by-play data to update',
-        plays_analyzed: pbpData.length,
-        plays_valid: 0,
-        plays_skipped: skippedPlays.length
+        message: 'No valid plays to backfill',
+        plays_analyzed: pbpData.length
       };
     }
     
@@ -668,12 +630,12 @@ async function runUpdater() {
     if (testMode) {
       console.log('\n🧪 TEST MODE: Simulating database updates...');
       updateResults.successful = transformedPlays.length;
-      console.log(`✅ TEST: Would upsert ${transformedPlays.length} complete NFLfastR records`);
+      console.log(`✅ TEST: Would upsert ${transformedPlays.length} plays`);
     } else {
-      console.log('\n💾 Updating complete NFLfastR data in database...');
+      console.log('\n💾 Backfilling plays to database...');
       
       try {
-        const batchSize = 100; // Increased from 75 for faster processing
+        const batchSize = 100;
         let totalProcessed = 0;
         
         for (let i = 0; i < transformedPlays.length; i += batchSize) {
@@ -689,13 +651,12 @@ async function runUpdater() {
           
           if (!upsertError) {
             totalProcessed += batch.length;
-            console.log(`  ✅ Batch ${batchNum} successful: ${batch.length} plays`);
+            console.log(`  ✅ Batch ${batchNum} successful`);
           } else {
             updateResults.errors.push(`Batch ${batchNum}: ${upsertError.message}`);
             console.error(`  ❌ Batch ${batchNum} failed: ${upsertError.message}`);
           }
           
-          // Small delay between batches to avoid overwhelming Supabase
           if (i + batchSize < transformedPlays.length) {
             await new Promise(resolve => setTimeout(resolve, 200));
           }
@@ -711,51 +672,26 @@ async function runUpdater() {
       }
     }
     
-    // Final summary
-    const summary = {
+    console.log('\n🎉 BACKFILL COMPLETE!');
+    console.log(`✅ ${updateResults.successful}/${updateResults.attempted} plays backfilled`);
+    
+    return {
       success: updateResults.successful > 0 || testMode,
-      message: testMode 
-        ? `TEST MODE: Complete NFLfastR updater - would update ${updateResults.successful} plays with all 372 columns`
-        : `Complete NFLfastR updater completed - updated ${updateResults.successful} plays with all 372 columns`,
-      execution_mode: testMode ? 'TEST_MODE' : 'LIVE_UPDATE',
-      timestamp: new Date().toISOString(),
-      completeness: {
-        schema_columns: 372,
-        mapped_columns: 372,
-        coverage_percentage: 100,
-        missing_columns: 0,
-        data_integrity: 'COMPLETE'
-      },
-      data_transformation: {
-        valid_2025_plays: transformedPlays.length,
-        skipped_plays: skippedPlays.length,
-        transformation_strategy: 'Complete schema mapping with proper type conversion',
-        column_handling: 'All 372 columns mapped with safe type conversion functions'
-      },
-      update_results: updateResults,
-      next_recommended_run: new Date(now.getTime() + (24 * 60 * 60 * 1000)).toISOString()
+      targets: BACKFILL_TARGETS,
+      update_results: updateResults
     };
     
-    console.log('\n🎉 COMPLETE NFLfastR UPDATER FINISHED!');
-    console.log(`📊 ALL 372 COLUMNS MAPPED AND PROCESSED`);
-    console.log(`✅ ${updateResults.successful}/${updateResults.attempted} plays updated`);
-    console.log(`🎯 100% schema coverage achieved`);
-    
-    return summary;
-    
   } catch (error) {
-    console.error('❌ Complete NFLfastR updater error:', error);
+    console.error('❌ Backfill error:', error);
     return {
       success: false,
-      error: error.message,
-      timestamp: new Date().toISOString(),
-      function_name: 'complete-nflfastr-updater'
+      error: error.message
     };
   }
 }
 
-// Run the updater
-runUpdater()
+// Run the backfill
+runBackfill()
   .then(result => {
     console.log('\n📋 Final Result:', JSON.stringify(result, null, 2));
     process.exit(result.success ? 0 : 1);
